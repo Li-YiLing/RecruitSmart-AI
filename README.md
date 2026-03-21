@@ -1,6 +1,9 @@
 # RecruitSmart AI - 職位說明與履歷比對輔助系統
 > **AI 驅動的自動化招募解決方案：連結企業需求 (JD) 與人才核心價值 (Resume)**
 
+## 📺 快速演示 (Quick Demo)
+![RecruitSmart AI Demo](./assets/demo.gif)
+
 ## 專案願景 (Project Vision)
 在企業數位轉型過程中，HR 部門面臨大量的履歷篩選壓力。本專案旨在透過 AI 應用，將傳統「關鍵字比對」提升至「語意邏輯分析」，協助企業快速識別具備實戰經驗的高潛力人才，並自動化生成高品質的面試問題建議。
 
