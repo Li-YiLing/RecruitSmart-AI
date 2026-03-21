@@ -1,4 +1,4 @@
-# RecruitSmart AI - 職能適配與智慧面試導航系統
+# RecruitSmart AI - 職位說明與履歷比對輔助系統
 > **AI 驅動的自動化招募解決方案：連結企業需求 (JD) 與人才核心價值 (Resume)**
 
 ## 📌 專案願景 (Project Vision)
