@@ -40,13 +40,13 @@ LANG_TEXT = {
         "experience_label": "相關經驗契合",
         "impact_label": "專案影響力與成果",
         "potential_label": "職位潛力與適配性",
-        "skills_subheader": "核心技能匹配",
-        "career_subheader": "職涯發展潛力",
-        "missing_subheader": "缺少的關鍵經驗",
-        "questions_subheader": "建議深度面試問題",
+        "skills_subheader": "✅ 核心技能匹配",
+        "career_subheader": "🚀 職涯發展潛力",
+        "missing_subheader": "⚠️ 缺少的關鍵經驗",
+        "questions_subheader": "💡 建議深度面試問題",
         "no_data": "無資料",
         "analyzing": "AI 員工正在努力分析中...",
-        "ranking_title": "候選人排名 (Ranking)",
+        "ranking_title": "🏆 候選人排名 (Ranking)",
     },
     "English": {
         "lang_label": "Language",
@@ -158,4 +158,80 @@ if "results" not in st.session_state: st.session_state.results = []
 c1, c2 = st.columns(2)
 with c1:
     st.subheader(t["jd_subheader"])
-    jd_mode = st.radio(
+    jd_mode = st.radio("Mode", [t["jd_input_mode_paste"], t["jd_input_mode_upload"]], horizontal=True, label_visibility="collapsed")
+    jd_text = st.text_area(t["jd_textarea_label"], height=200) if jd_mode == t["jd_input_mode_paste"] else None
+    if jd_mode == t["jd_input_mode_upload"]:
+        jd_f = st.file_uploader(t["jd_uploader_label"], type=["pdf", "txt"])
+        if jd_f: jd_text = extract_text_from_pdf(jd_f) if jd_f.type == "application/pdf" else jd_f.read().decode()
+
+with c2:
+    st.subheader(t["resume_subheader"])
+    res_files = st.file_uploader(t["resume_uploader_label"], type=["pdf"], accept_multiple_files=True)
+
+# --- Analysis Logic ---
+if st.button(t["analyze_btn"]) and jd_text and res_files:
+    if not api_key: st.error(t["error_no_key"])
+    else:
+        st.session_state.results = []
+        target_ai_lang = "Traditional Chinese" if lang == "繁體中文" else "English"
+        prog = st.progress(0)
+        for i, f in enumerate(res_files):
+            st.write(f"🔍 Processing: {f.name}")
+            res = analyze_resume(jd_text, extract_text_from_pdf(f), api_key, target_ai_lang)
+            st.session_state.results.append({"name": res.get("name", "Unknown"), "score": res.get("score", 0), "data": res})
+            prog.progress((i + 1) / len(res_files))
+        st.session_state.results.sort(key=lambda x: x["score"], reverse=True)
+        st.rerun()
+
+# --- Display Results ---
+if st.session_state.results:
+    with st.sidebar:
+        st.divider()
+        st.subheader(t["ranking_title"])
+        # 顯示排名清單
+        options = [f"[{r['score']}] {r['name']}" for r in st.session_state.results]
+        sel_label = st.radio("Candidates", options, index=0)
+        sel_idx = options.index(sel_label)
+        selected_candidate = st.session_state.results[sel_idx]["data"]
+
+    # 主畫面顯示詳細報告
+    res = selected_candidate
+    st.divider()
+    st.header(f"👤 {res.get('name')}")
+    
+    col_score, col_empty = st.columns([1, 2])
+    col_score.metric(t["score_metric_label"], f"{res.get('score')}/100")
+    
+    with st.expander(t["score_details"], expanded=True):
+        config = [
+            ("technical_skills", t["technical_skills_label"]),
+            ("experience", t["experience_label"]),
+            ("impact", t["impact_label"]),
+            ("potential", t["potential_label"]),
+        ]
+        for key, label in config:
+            item = res.get("score_breakdown", {}).get(key, {})
+            score = item.get("score", 0)
+            reason = item.get("reason", "")
+            
+            # SaaS 專業排版
+            c_lab, c_val = st.columns([3, 1])
+            c_lab.markdown(f"**{label}**")
+            c_val.markdown(f"<p style='text-align:right; margin-bottom:0;'>{score} / 25</p>", unsafe_allow_html=True)
+            st.progress(score / 25)
+            st.markdown(f"<p style='text-align:right; font-size:12px; color:gray; margin-top:-15px;'>25</p>", unsafe_allow_html=True)
+            st.caption(reason)
+            st.write("")
+
+    # 其他欄位
+    st.subheader(t["skills_subheader"])
+    for s in res.get("core_skills_match", []): st.write(f"✅ {s}")
+    
+    st.subheader(t["career_subheader"])
+    st.write(res.get("career_potential", ""))
+    
+    st.subheader(t["missing_subheader"])
+    for m in res.get("missing_experience", []): st.write(f"⚠️ {m}")
+    
+    st.subheader(t["questions_subheader"])
+    for i, q in enumerate(res.get("interview_questions", []), 1): st.write(f"{i}. {q}")
