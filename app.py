@@ -134,6 +134,7 @@ def analyze_resume(jd_text, resume_text, api_key, target_lang="English"):
         "『我看到你在 [具體專案名稱] 用了 [X 技術]，請問你是如何解決 [Y 問題/挑戰] 的？』"
         "禁止泛泛而談（例如：『請介紹你的專案經驗』）。\n\n"
         "請依下述格式回傳 JSON：{\n"
+        '  "name": string,      // 候選人全名；若履歷無法辨識姓名，回傳 "Unknown Candidate"\n'
         '  "score": int,       // 總分 0-100，必須等於 score_breakdown 四項加總\n'
         '  "score_breakdown": {\n'
         '    "technical_skills": { "score": int (0-25), "reason": string },  // 技術技能匹配\n'
@@ -146,6 +147,7 @@ def analyze_resume(jd_text, resume_text, api_key, target_lang="English"):
         '  "career_potential": string,      // 簡短評估職涯發展潛力（1-2 句）\n'
         '  "interview_questions": [string]  // 5 個針對履歷具體內容的深度面試問題\n'
         "}\n"
+        "你務必從履歷中提取候選人全名填入 name；若找不到，name 必須為 Unknown Candidate。"
         "score 必須等於 score_breakdown 四項分數的加總。只回傳純 JSON，不要說明文字。Return ONLY a valid JSON object. Do not include any preamble or postscript.\n\n"
         f"{lang_instruction}"
     )
@@ -231,78 +233,124 @@ with col1:
                 st.warning(texts["jd_format_warning"])
 with col2:
     st.subheader(texts["resume_subheader"])
-    resume_file = st.file_uploader(texts["resume_uploader_label"], type=["pdf"], key="resume_file")
+    resume_files = st.file_uploader(
+        texts["resume_uploader_label"],
+        type=["pdf"],
+        key="resume_files",
+        accept_multiple_files=True,
+    )
 
-resume_text = None
-if resume_file is not None:
-    resume_text = extract_text_from_pdf(resume_file)
+if "results" not in st.session_state:
+    st.session_state.results = []
 
-if st.button(texts["analyze_btn"]) and jd_text and resume_text:
+def render_candidate_report(result):
+    st.subheader(texts["score_subheader"])
+    st.metric(texts["score_metric_label"], result.get("score", 0), help=texts["score_metric_help"])
+
+    score_breakdown = result.get("score_breakdown", {})
+    breakdown_config = [
+        ("technical_skills", texts["technical_skills_label"]),
+        ("experience", texts["experience_label"]),
+        ("impact", texts["impact_label"]),
+        ("potential", texts["potential_label"]),
+    ]
+    if score_breakdown and isinstance(score_breakdown, dict):
+        with st.expander(texts["score_details"], expanded=False):
+            for key, label in breakdown_config:
+                item = score_breakdown.get(key, {})
+                if isinstance(item, dict):
+                    s = int(item.get("score", 0))
+                    r = str(item.get("reason", "")).strip()
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.markdown(f'<p style="font-size: 1.2em; font-weight: 600;">{label}</p>', unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f'<p style="font-size: 1.2em; text-align: right;">{s}/25</p>', unsafe_allow_html=True)
+                    st.progress(min(max(s / 25, 0), 1.0))
+                    if r:
+                        st.write(r)
+                elif isinstance(item, (int, float)):
+                    s = int(item)
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.markdown(f'<p style="font-size: 1.2em; font-weight: 600;">{label}</p>', unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f'<p style="font-size: 1.2em; text-align: right;">{s}/25</p>', unsafe_allow_html=True)
+                    st.progress(min(max(s / 25, 0), 1.0))
+    else:
+        with st.expander(texts["score_details"], expanded=False):
+            st.write(texts["no_data"])
+
+    st.subheader(texts["skills_subheader"])
+    core_skills = result.get("core_skills_match", [])
+    if isinstance(core_skills, list) and core_skills:
+        markdown = "\n".join([f"- ✅ {str(skill)}" for skill in core_skills])
+        st.markdown(markdown)
+    else:
+        st.write(texts["no_data"])
+
+    st.subheader(texts["career_subheader"])
+    st.write(result.get("career_potential", texts["no_data"]))
+
+    st.subheader(texts["missing_subheader"])
+    missing_exp = result.get("missing_experience", [])
+    if isinstance(missing_exp, list) and missing_exp:
+        markdown = "\n".join([f"- ⚠️ {str(item)}" for item in missing_exp])
+        st.markdown(markdown)
+    else:
+        st.write(texts["no_data"])
+
+    st.subheader(texts["questions_subheader"])
+    for i, q in enumerate(result.get("interview_questions", []), 1):
+        st.write(f"{i}. {q}")
+
+if st.button(texts["analyze_btn"]) and jd_text and resume_files:
     if not openai_api_key:
         st.error(texts["error_no_key"])
     else:
         target_lang = "Traditional Chinese" if lang == "繁體中文" else "English"
-        with st.spinner(texts["analyzing"]):
+        st.session_state.results = []
+
+        progress = st.progress(0)
+        status = st.empty()
+        total = len(resume_files)
+
+        for idx, resume_file in enumerate(resume_files, start=1):
+            status.write(f"正在處理第 {idx}/{total} 份履歷...")
+            resume_text = extract_text_from_pdf(resume_file)
             result = analyze_resume(jd_text, resume_text, openai_api_key, target_lang=target_lang)
-        if "error" in result:
-            st.error(texts["error_analyze"].format(msg=result["error"]))
-        else:
-            st.subheader(texts["score_subheader"])
-            st.metric(texts["score_metric_label"], result.get("score", 0), help=texts["score_metric_help"])
 
-            score_breakdown = result.get("score_breakdown", {})
-            breakdown_config = [
-                ("technical_skills", texts["technical_skills_label"]),
-                ("experience", texts["experience_label"]),
-                ("impact", texts["impact_label"]),
-                ("potential", texts["potential_label"]),
-            ]
-            if score_breakdown and isinstance(score_breakdown, dict):
-                with st.expander(texts["score_details"], expanded=False):
-                    for key, label in breakdown_config:
-                        item = score_breakdown.get(key, {})
-                        if isinstance(item, dict):
-                            s = int(item.get("score", 0))
-                            r = str(item.get("reason", "")).strip()
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                st.markdown(f'<p style="font-size: 1.2em; font-weight: 600;">{label}</p>', unsafe_allow_html=True)
-                            with c2:
-                                st.markdown(f'<p style="font-size: 1.2em; text-align: right;">{s}/25</p>', unsafe_allow_html=True)
-                            st.progress(min(max(s / 25, 0), 1.0))
-                            if r:
-                                st.write(r)
-                        elif isinstance(item, (int, float)):
-                            s = int(item)
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                st.markdown(f'<p style="font-size: 1.2em; font-weight: 600;">{label}</p>', unsafe_allow_html=True)
-                            with c2:
-                                st.markdown(f'<p style="font-size: 1.2em; text-align: right;">{s}/25</p>', unsafe_allow_html=True)
-                            st.progress(min(max(s / 25, 0), 1.0))
+            if "error" in result:
+                candidate_name = "Unknown Candidate"
+                score = -1
             else:
-                with st.expander(texts["score_details"], expanded=False):
-                    st.write(texts["no_data"])
+                candidate_name = str(result.get("name", "Unknown Candidate")).strip() or "Unknown Candidate"
+                score = int(result.get("score", 0))
 
-            st.subheader(texts["skills_subheader"])
-            core_skills = result.get("core_skills_match", [])
-            if isinstance(core_skills, list) and core_skills:
-                markdown = "\n".join([f"- ✅ {str(skill)}" for skill in core_skills])
-                st.markdown(markdown)
-            else:
-                st.write(texts["no_data"])
+            st.session_state.results.append(
+                {
+                    "name": candidate_name,
+                    "score": score,
+                    "result": result,
+                    "file_name": resume_file.name,
+                }
+            )
+            progress.progress(idx / total)
 
-            st.subheader(texts["career_subheader"])
-            st.write(result.get("career_potential", texts["no_data"]))
+        st.session_state.results.sort(key=lambda x: x.get("score", -1), reverse=True)
+        status.write("分析完成")
 
-            st.subheader(texts["missing_subheader"])
-            missing_exp = result.get("missing_experience", [])
-            if isinstance(missing_exp, list) and missing_exp:
-                markdown = "\n".join([f"- ⚠️ {str(item)}" for item in missing_exp])
-                st.markdown(markdown)
-            else:
-                st.write(texts["no_data"])
+if st.session_state.results:
+    with st.sidebar:
+        st.subheader("候選人排名 (Ranking)")
+        options = [f"[{item.get('score', 0)}] {item.get('name', 'Unknown Candidate')}" for item in st.session_state.results]
+        selected_label = st.radio("Ranking", options=options, index=0, label_visibility="collapsed")
 
-            st.subheader(texts["questions_subheader"])
-            for i, q in enumerate(result.get("interview_questions", []), 1):
-                st.write(f"{i}. {q}")
+    selected_idx = options.index(selected_label)
+    selected = st.session_state.results[selected_idx]
+
+    st.subheader(selected.get("name", "Unknown Candidate"))
+    if "error" in selected.get("result", {}):
+        st.error(texts["error_analyze"].format(msg=selected["result"]["error"]))
+    else:
+        render_candidate_report(selected["result"])
